@@ -19,8 +19,8 @@ namespace Buck.SaveAsyncExample
         // For an example that uses a Guid, see CacheDataExample.cs.
         public string Key => "GameDataExample";
         public string Filename => Files.GameData;
-        
-        public int Version => 1;
+        public StorageScope Scope => StorageScope.Global;
+        public int Version => 0;
 
         [Serializable]
         public struct Item

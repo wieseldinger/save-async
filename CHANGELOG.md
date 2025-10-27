@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.14.0] – 2025-10-27
+
+### Breaking Change: Scoped file routing
+
+- `ISaveable<TState>` now declares `StorageScope` Scope (Global or Slot), making pathing explicit and removing the need to toggle `SaveManager.SaveSlotIndex` just to “ignore” slots. 
+- Scope remembered at registration: `SaveManager` records a filename scope mapping when `RegisterSaveable(...)` is called and uses it for path resolution. (Internal change; no new public API.)
+- `FileHandler` pathing updated: `GetPartialPath()` now prefixes slot{N}/ only for Slot‑scoped files. Attempting to save/load a Slot‑scoped file with no selected slot throws a clear error. (Prevents global files like Options from accidentally ending up in a slot folder.) 
+
+### Migration notes
+
+- Add `StorageScope Scope { get; }` to every `ISaveable<TState>`. Use Global for shared data (e.g., options/settings) and Slot for per‑profile data. 
+- Remove any code that temporarily sets SaveManager.SaveSlotIndex = -1 around global saves; it’s no longer necessary.
+
 ## [0.13.0] – 2025-09-22
 
 ### Breaking Change

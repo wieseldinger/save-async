@@ -2,6 +2,8 @@
 
 namespace Buck.SaveAsync
 {
+    public enum StorageScope { Global, Slot }
+    
     /// <summary>
     /// Allows an object to be saved and loaded via the SaveManager class using a strongly-typed state.
     /// Implementations should define a serializable struct or class for TState.
@@ -22,6 +24,11 @@ namespace Buck.SaveAsync
         /// It is recommended to use a static class to store file paths as strings to avoid typos.
         /// </summary>
         string Filename { get; }
+        
+        /// <summary>
+        /// This indicates whether the data is saved globally or per save slot.
+        /// </summary>
+        StorageScope Scope { get; }
         
         /// <summary>
         /// This is the current version of this ISaveable's data structure.

@@ -67,9 +67,19 @@ namespace Buck.SaveAsync
 
             string path = $"{pathOrFilename}{FilenameSuffix}{FileExtension}";
 
-            if (SaveManager.SaveSlotIndex > -1)
-                return Path.Combine($"slot{SaveManager.SaveSlotIndex}", path);
+            var scope = SaveManager.ResolveScopeFor(pathOrFilename);
+            
+            if (scope == StorageScope.Slot)
+            {
+                if (SaveManager.SaveSlotIndex < 0)
+                    throw new InvalidOperationException(
+                        "[Save Async] Slot-scoped file requested but SaveSlotIndex is not set. " +
+                        "Set SaveManager.SaveSlotIndex before saving/loading slot-scoped files.");
 
+                return Path.Combine($"slot{SaveManager.SaveSlotIndex}", path);
+            }
+
+            // If the scope is global, just return the path as-is
             return path;
         }
 

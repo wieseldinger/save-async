@@ -110,6 +110,7 @@ namespace Buck.SaveAsync
         static readonly Dictionary<string, IBoxedSaveable> m_saveables = new();
         static readonly List<LoadedSaveable> m_loadedSaveables = new();
         static readonly Queue<FileOperation> m_fileOperationQueue = new();
+        static readonly Dictionary<string, StorageScope> s_fileScopes = new();
 
         static readonly object s_QueueLock = new();
         static bool m_initialized;
@@ -174,20 +175,22 @@ namespace Buck.SaveAsync
             var boxed = new BoxedSaveable<TState>(saveable);
             if (!m_saveables.TryAdd(boxed.Key, boxed))
                 Debug.LogWarning($"[Save Async] SaveManager.RegisterSaveable() - Saveable with Key \"{boxed.Key}\" already exists.");
+            
+            var scope = saveable.Scope;
+            if (s_fileScopes.TryGetValue(boxed.Filename, out var existing) && existing != scope)
+                Debug.LogError($"[Save Async] Conflicting scopes for filename \"{boxed.Filename}\": {existing} vs {scope}.");
+            else
+                s_fileScopes[boxed.Filename] = scope;
         }
-
-        /// <summary>
-        /// Unregisters a previously registered ISaveable by key. This is useful when unloading scenes.
-        /// </summary>
-        /// <param name="key">The unique key of the ISaveable to unregister.</param>
-        public static void UnregisterSaveable(string key)
+        
+        internal static StorageScope ResolveScopeFor(string filename)
         {
-            Initialize();
+            if (string.IsNullOrEmpty(filename))
+                return StorageScope.Slot; // safest default
 
-            if (string.IsNullOrEmpty(key))
-                return;
-
-            m_saveables.Remove(key);
+            return s_fileScopes.TryGetValue(filename, out var scope)
+                ? scope
+                : StorageScope.Slot; // default Slot unless explicitly registered as Global
         }
 
         /// <summary>
