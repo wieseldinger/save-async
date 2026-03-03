@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.14.1] – 2026-03-03
+
+- FileHandler.GetPartialPath is now marked virtual and SaveManager.ResolveScopeFor is now public so that both methods can be more easily utilized by custom FileHandler classes.
+
 ## [0.14.0] – 2025-10-27
 
 ### Breaking Change: Scoped file routing

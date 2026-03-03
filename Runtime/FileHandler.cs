@@ -61,7 +61,7 @@ namespace Buck.SaveAsync
         /// </code>
         /// </summary>
         /// <param name="pathOrFilename">The path or filename of the file that will be combined with the persistent data path.</param>
-        protected string GetPartialPath(string pathOrFilename)
+        protected virtual string GetPartialPath(string pathOrFilename)
         {
             ValidatePath(pathOrFilename);
 

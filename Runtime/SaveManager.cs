@@ -183,14 +183,12 @@ namespace Buck.SaveAsync
                 s_fileScopes[boxed.Filename] = scope;
         }
         
-        internal static StorageScope ResolveScopeFor(string filename)
+        public static StorageScope ResolveScopeFor(string filename)
         {
             if (string.IsNullOrEmpty(filename))
                 return StorageScope.Slot; // safest default
 
-            return s_fileScopes.TryGetValue(filename, out var scope)
-                ? scope
-                : StorageScope.Slot; // default Slot unless explicitly registered as Global
+            return s_fileScopes.GetValueOrDefault(filename, StorageScope.Slot); // default Slot unless explicitly registered as Global
         }
 
         /// <summary>
