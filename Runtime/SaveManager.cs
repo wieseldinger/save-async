@@ -675,17 +675,30 @@ namespace Buck.SaveAsync
 
             foreach (var s in saveables)
             {
+                bool destroyed = false;
                 object data = null;
+                JToken token = null;
                 try
                 {
                     data = s.CaptureStateBoxed();
+                    token = JToken.FromObject(data, JsonSerializer.CreateDefault(s_jsonNoTypes));
                 }
                 catch (Exception e)
                 {
-                    Debug.LogError($"[Save Async] SaveManager.SaveablesToJson() - Failed to capture state for ISaveable with key \"{s.Key}\": {e.Message}\n{e.StackTrace}");
-                }
+                    var destroyedField = s.StateType.GetField("__destroyed", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
 
-                var token = JToken.FromObject(data, JsonSerializer.CreateDefault(s_jsonNoTypes));
+                    if (destroyedField != null)
+                    {
+                        token = new JObject
+                        {
+                            ["__destroyed"] = true
+                        };
+                    }
+                    else
+                    {
+                        Debug.LogError($"[Save Async] SaveManager.SaveablesToJson() - Failed to capture state for ISaveable with key \"{s.Key}\": {e.Message}\n{e.StackTrace}");
+                    }
+                }
 
                 var obj = new JObject
                 {
