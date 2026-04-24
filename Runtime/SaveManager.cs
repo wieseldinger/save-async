@@ -71,6 +71,7 @@ namespace Buck.SaveAsync
             Type StateType { get; }
             int Version { get; }
             object CaptureStateBoxed();
+            bool IsDestroyed { get; }
             void RestoreStateBoxed(object state);
         }
 
@@ -519,7 +520,12 @@ namespace Buck.SaveAsync
 
                     if (!m_saveables.TryGetValue(loaded.Key, out var boxed) || boxed == null)
                     {
-                        Debug.LogError($"[Save Async] SaveManager.DoFileOperation() - The ISaveable with the key \"{loaded.Key}\" was not found or is null. The data will not be restored.");
+                        Debug.LogWarning($"[Save Async] SaveManager.DoFileOperation() - The ISaveable with the key \"{loaded.Key}\" was not found or is null. The data will not be restored.");
+                        continue;
+                    }
+
+                    if (boxed.IsDestroyed)
+                    {
                         continue;
                     }
 
