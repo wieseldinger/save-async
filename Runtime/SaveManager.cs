@@ -70,8 +70,8 @@ namespace Buck.SaveAsync
             string Filename { get; }
             Type StateType { get; }
             int Version { get; }
-            object CaptureStateBoxed();
             bool IsDestroyed { get; }
+            object CaptureStateBoxed();
             void RestoreStateBoxed(object state);
         }
 
@@ -85,6 +85,7 @@ namespace Buck.SaveAsync
             public string Filename => m_inner.Filename;
             public Type StateType => typeof(TState);
             public int Version => m_inner.Version;
+            public bool IsDestroyed => m_inner is UnityEngine.Object unityObj && unityObj == null;
 
             public object CaptureStateBoxed() => m_inner.CaptureState();
 
