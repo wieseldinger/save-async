@@ -1,12 +1,14 @@
 // MIT License - Copyright (c) 2025 BUCK Design LLC - https://github.com/buck-co
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
 using System.Reflection;
 using UnityEngine;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+//using System.Diagnostics;
 
 namespace Buck.SaveAsync
 {
@@ -106,12 +108,15 @@ namespace Buck.SaveAsync
             public string Key;
             public int EntryVersion;
             public JToken Data;
+            public string Filename;
         }
 
         static FileHandler m_fileHandler;
 
         static readonly Dictionary<string, IBoxedSaveable> m_saveables = new();
-        static readonly List<LoadedSaveable> m_loadedSaveables = new();
+        
+        static readonly Dictionary<string, LoadedSaveable> m_cachedSaveData = new();
+        
         static readonly Queue<FileOperation> m_fileOperationQueue = new();
         static readonly Dictionary<string, StorageScope> s_fileScopes = new();
 
@@ -153,6 +158,11 @@ namespace Buck.SaveAsync
         /// Boolean indicating whether a file operation is in progress.
         /// </summary>
         public static bool IsBusy { get; private set; }
+        
+        /// <summary>
+        /// Boolean indicating whether a load operation has successfully populated the data cache.
+        /// </summary>
+        public static bool IsDataLoaded { get; private set; }
 
         /// <summary>
         /// Stores the current save slot index, which can be used to determine which save slot to use for saving and loading files.
@@ -176,16 +186,65 @@ namespace Buck.SaveAsync
             }
 
             var boxed = new BoxedSaveable<TState>(saveable);
+
             if (!m_saveables.TryAdd(boxed.Key, boxed))
+            {
                 Debug.LogWarning($"[Save Async] SaveManager.RegisterSaveable() - Saveable with Key \"{boxed.Key}\" already exists.");
+                return;
+            }
             
             var scope = saveable.Scope;
             if (s_fileScopes.TryGetValue(boxed.Filename, out var existing) && existing != scope)
                 Debug.LogError($"[Save Async] Conflicting scopes for filename \"{boxed.Filename}\": {existing} vs {scope}.");
             else
                 s_fileScopes[boxed.Filename] = scope;
+
+            if (IsDataLoaded && !IsBusy)
+            {
+                ExecuteLateBind(boxed);
+            }
+            else
+            {
+                if (Instance != null)
+                {
+                    Instance.StartCoroutine(DeferredRestoreRoutine(boxed));
+                }
+            }
         }
         
+        static void ExecuteLateBind(IBoxedSaveable boxed)
+        {
+            if (m_cachedSaveData.TryGetValue(boxed.Key, out var loadedInfo))
+            {
+                if (loadedInfo.EntryVersion != boxed.Version)
+                {
+                    Debug.LogWarning($"[Save Async] Version mismatch on Late Bind for key \"{loadedInfo.Key}\". Defaults will be used.");
+                    boxed.RestoreStateBoxed(null);
+                }
+                else
+                {
+                    try
+                    {
+                        object state = loadedInfo.Data?.ToObject(boxed.StateType, JsonSerializer.CreateDefault(s_jsonNoTypes));
+                        boxed.RestoreStateBoxed(state);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"[Save Async] Failed to late-restore state for key \"{loadedInfo.Key}\": {ex.Message}");
+                    }
+                }
+                
+                m_cachedSaveData.Remove(boxed.Key); 
+            }
+        }
+
+        static IEnumerator DeferredRestoreRoutine(IBoxedSaveable boxed)
+        {
+            yield return new WaitUntil(() => !IsBusy && IsDataLoaded);
+            
+            ExecuteLateBind(boxed);
+        }
+
         public static StorageScope ResolveScopeFor(string filename)
         {
             if (string.IsNullOrEmpty(filename))
@@ -485,9 +544,11 @@ namespace Buck.SaveAsync
                 await Awaitable.MainThreadAsync();
 
                 if (processedLoad || processedLoadDefaults)
+                {
                     RestorePass(affectedFilenames, processedLoad, processedLoadDefaults);
-
-                m_loadedSaveables.Clear();
+                    
+                    IsDataLoaded = true;
+                }
             }
             catch (Exception e)
             {
@@ -509,9 +570,11 @@ namespace Buck.SaveAsync
             foreach (var kvp in m_saveables)
                 restoredSaveables[kvp.Key] = false;
 
-            if (didLoad && m_loadedSaveables.Count > 0)
+            List<string> keysToConsume = new List<string>();
+
+            if (didLoad && m_cachedSaveData.Count > 0)
             {
-                foreach (var loaded in m_loadedSaveables)
+                foreach (var loaded in m_cachedSaveData.Values)
                 {
                     if (loaded.Key == null)
                     {
@@ -521,7 +584,6 @@ namespace Buck.SaveAsync
 
                     if (!m_saveables.TryGetValue(loaded.Key, out var boxed) || boxed == null)
                     {
-                        Debug.LogWarning($"[Save Async] SaveManager.DoFileOperation() - The ISaveable with the key \"{loaded.Key}\" was not found or is null. The data will not be restored.");
                         continue;
                     }
 
@@ -530,14 +592,14 @@ namespace Buck.SaveAsync
                         continue;
                     }
 
-                    // Version check: if the on-disk entry's Version doesn't match the registered saveable's Version,
-                    // skip old data and explicitly restore defaults for this saveable.
                     if (loaded.EntryVersion != boxed.Version)
                     {
                         Debug.LogWarning($"[Save Async] SaveManager.DoFileOperation() - Version mismatch for key \"{loaded.Key}\". " +
                                          $"Save data has Version {loaded.EntryVersion}; runtime expects {boxed.Version}. Defaults will be used.");
                         boxed.RestoreStateBoxed(null);
                         restoredSaveables[loaded.Key] = true;
+                        
+                        keysToConsume.Add(loaded.Key);
                         continue;
                     }
 
@@ -546,12 +608,19 @@ namespace Buck.SaveAsync
                         object state = loaded.Data?.ToObject(boxed.StateType, JsonSerializer.CreateDefault(s_jsonNoTypes));
                         boxed.RestoreStateBoxed(state);
                         restoredSaveables[loaded.Key] = true;
+                        
+                        keysToConsume.Add(loaded.Key);
                     }
                     catch (Exception ex)
                     {
                         Debug.LogError($"[Save Async] SaveManager.DoFileOperation() - Failed to restore state for key \"{loaded.Key}\": {ex.Message}\n{ex.StackTrace}");
                     }
                 }
+            }
+
+            foreach (string key in keysToConsume)
+            {
+                m_cachedSaveData.Remove(key);
             }
 
             foreach (var kvp in m_saveables)
@@ -590,7 +659,8 @@ namespace Buck.SaveAsync
                         if (s.Filename == filename)
                             toSave.Add(s);
 
-                    string json = SaveablesToJson(toSave);
+                    string json = SaveablesToJson(toSave, filename);
+                    
                     if (string.IsNullOrEmpty(json))
                         throw new InvalidOperationException($"[Save Async] SaveManager.SaveFileOperationAsync() - JSON serialization returned empty for file \"{filename}\".");
 
@@ -613,6 +683,9 @@ namespace Buck.SaveAsync
 
             try
             {
+                m_cachedSaveData.Clear();
+                IsDataLoaded = false;
+                
                 foreach (string filename in filenames)
                 {
                     string fileContent = await m_fileHandler.ReadFile(filename, ct).ConfigureAwait(false);
@@ -628,14 +701,16 @@ namespace Buck.SaveAsync
                         foreach (var item in array)
                         {
                             var key = item["Key"]?.ToString();
-                            int entryVersion = item["Version"]?.Value<int?>() ?? 0; // legacy entries will be 0
+                            int entryVersion = item["Version"]?.Value<int?>() ?? 0;
                             var data = item["Data"];
-                            m_loadedSaveables.Add(new LoadedSaveable
+                            
+                            m_cachedSaveData[key] = new LoadedSaveable
                             {
                                 Key = key,
                                 EntryVersion = entryVersion,
-                                Data = data
-                            });
+                                Data = data,
+                                Filename = filename
+                            };
                         }
                     }
                     catch (Exception ex)
@@ -674,7 +749,7 @@ namespace Buck.SaveAsync
             }
         }
 
-        static string SaveablesToJson(List<IBoxedSaveable> saveables)
+        static string SaveablesToJson(List<IBoxedSaveable> saveables, string currentFilename)
         {
             if (saveables == null)
                 throw new ArgumentNullException(nameof(saveables));
@@ -716,6 +791,20 @@ namespace Buck.SaveAsync
                 };
 
                 array.Add(obj);
+            }
+
+            foreach (var cachedOrphan in m_cachedSaveData.Values)
+            {
+                if (cachedOrphan.Filename != currentFilename) continue;
+
+                var orphanObj = new JObject
+                {
+                    ["Key"] = cachedOrphan.Key,
+                    ["Version"] = cachedOrphan.EntryVersion,
+                    ["Data"] = cachedOrphan.Data
+                };
+                
+                array.Add(orphanObj);
             }
 
             return array.ToString(Formatting.Indented);
