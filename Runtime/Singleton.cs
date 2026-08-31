@@ -57,7 +57,13 @@ namespace Buck.SaveAsync
         void OnApplicationQuit()
             => m_ShuttingDown = true;
 
+        // Only clear the instance here, never set m_ShuttingDown. A singleton that lives in a
+        // scene is destroyed on every scene change, and latching the flag there would make
+        // Instance return null for the rest of the process.
         void OnDestroy()
-            => m_ShuttingDown = true;
+        {
+            if (ReferenceEquals(m_Instance, this))
+                m_Instance = null;
+        }
     }
 }

@@ -8,6 +8,7 @@ using System.Reflection;
 using UnityEngine;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using UnityEngine.SceneManagement;
 //using System.Diagnostics;
 
 namespace Buck.SaveAsync
@@ -149,7 +150,30 @@ namespace Buck.SaveAsync
                 ? Instance.m_customFileHandler
                 : ScriptableObject.CreateInstance<FileHandler>();
 
+            SceneManager.sceneUnloaded -= OnSceneUnloaded;
+            SceneManager.sceneUnloaded += OnSceneUnloaded;
+
             m_initialized = true;
+        }
+
+        /// <summary>
+        /// Drops saveables whose objects went away with the scene, plus any loaded save data that
+        /// was never claimed. The registry is static and outlives every scene, so without this a
+        /// second load of the same scene finds all of its keys already taken by dead components.
+        /// </summary>
+        static void OnSceneUnloaded(Scene scene)
+        {
+            var destroyedKeys = new List<string>();
+
+            foreach (var kvp in m_saveables)
+                if (kvp.Value.IsDestroyed)
+                    destroyedKeys.Add(kvp.Key);
+
+            foreach (string key in destroyedKeys)
+                m_saveables.Remove(key);
+
+            m_cachedSaveData.Clear();
+            IsDataLoaded = false;
         }
 
         #region SaveAsync API
@@ -189,8 +213,15 @@ namespace Buck.SaveAsync
 
             if (!m_saveables.TryAdd(boxed.Key, boxed))
             {
-                Debug.LogWarning($"[Save Async] SaveManager.RegisterSaveable() - Saveable with Key \"{boxed.Key}\" already exists.");
-                return;
+                if (!m_saveables[boxed.Key].IsDestroyed)
+                {
+                    Debug.LogWarning($"[Save Async] SaveManager.RegisterSaveable() - Saveable with Key \"{boxed.Key}\" already exists.");
+                    return;
+                }
+
+                // The key is held by an object that has since been destroyed, so let the new one
+                // take it over instead of turning it away.
+                m_saveables[boxed.Key] = boxed;
             }
             
             var scope = saveable.Scope;
@@ -458,7 +489,8 @@ namespace Buck.SaveAsync
 
         static OperationContext CreateContext()
         {
-            var linked = CancellationTokenSource.CreateLinkedTokenSource(Instance.destroyCancellationToken, Application.exitCancellationToken).Token;
+            var instanceToken = Instance != null ? Instance.destroyCancellationToken : CancellationToken.None;
+            var linked = CancellationTokenSource.CreateLinkedTokenSource(instanceToken, Application.exitCancellationToken).Token;
             return new OperationContext
             {
                 UseBackgroundThread = Instance && Instance.m_useBackgroundThread,
